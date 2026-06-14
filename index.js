@@ -2,54 +2,81 @@
 
 const express = require("express");
 const fetch = require("node-fetch");
-const { addonBuilder, getRouter } = require("stremio-addon-sdk");
 
 const app = express();
 app.use(express.static("public"));
 
 const MDL = "https://mydramalist.github.io/MDL-API";
+const TMDB = "https://api.themoviedb.org/3";
+const TMDB_KEY = process.env.TMDB_KEY;
 
-// Decode config from ?config=BASE64
-function decodeConfig(req) {
-  const raw = req.query.config;
-  if (!raw) return null;
+// Decode Base64 config
+function decodeConfig(base64) {
   try {
-    return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-  } catch (e) {
+    return JSON.parse(Buffer.from(base64, "base64").toString("utf8"));
+  } catch {
     return null;
   }
 }
 
-// Convert MDL → Stremio meta
-function mdlToMeta(item) {
+// TMDB lookup
+async function resolveTMDB(drama) {
+  const query = encodeURIComponent(drama.title);
+  const year = drama.year || "";
+
+  const url = `${TMDB}/search/tv?api_key=${TMDB_KEY}&query=${query}&first_air_date_year=${year}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (!data.results.length) return null;
+  return data.results[0];
+}
+
+// Convert MDL → TMDB → Stremio meta
+async function mdlToStremio(drama) {
+  const tmdb = await resolveTMDB(drama);
+
+  if (!tmdb) {
+    return {
+      id: `mdl:${drama.id}`,
+      type: "series",
+      name: drama.title,
+      poster: drama.image,
+      description: drama.synopsis
+    };
+  }
+
   return {
-    id: `mdl:${item.id}`,
+    id: `tmdb:${tmdb.id}`,
     type: "series",
-    name: item.title,
-    poster: item.image || item.poster,
-    posterShape: "poster",
-    description: item.synopsis,
-    releaseInfo: item.year,
-    genres: item.genres || [],
-    rating: item.score
+    name: tmdb.name,
+    poster: tmdb.poster_path
+      ? `https://image.tmdb.org/t/p/w500${tmdb.poster_path}`
+      : drama.image,
+    background: tmdb.backdrop_path
+      ? `https://image.tmdb.org/t/p/original${tmdb.backdrop_path}`
+      : null,
+    description: tmdb.overview || drama.synopsis,
+    releaseInfo: tmdb.first_air_date,
+    rating: tmdb.vote_average,
+    genres: tmdb.genre_ids
   };
 }
 
-// Fetch MDL custom list
-async function fetchCustomList(listId) {
-  const res = await fetch(`${MDL}/list/${listId}`);
+// Fetch MDL endpoints
+async function fetchCustomList(id) {
+  const res = await fetch(`${MDL}/list/${id}`);
   const data = await res.json();
-  return data.map(mdlToMeta);
+  return Promise.all(data.map(mdlToStremio));
 }
 
-// Fetch MDL user lists
 async function fetchUserLists(username) {
   const res = await fetch(`${MDL}/user/${username}/lists`);
   const data = await res.json();
-  return data.map(mdlToMeta);
+  return Promise.all(data.map(mdlToStremio));
 }
 
-// Fetch MDL country lists
 async function fetchCountryList(country, mode) {
   const endpoint =
     mode === "popular"
@@ -58,101 +85,17 @@ async function fetchCountryList(country, mode) {
 
   const res = await fetch(endpoint);
   const data = await res.json();
-  return data.map(mdlToMeta);
+  return Promise.all(data.map(mdlToStremio));
 }
 
-// Dynamic manifest route
+// Manifest route
 app.get("/manifest.json", (req, res) => {
-  const cfg = decodeConfig(req) || {};
+  const configBase64 = req.query.config;
+  const cfg = decodeConfig(configBase64) || {};
 
   const catalogs = [];
 
   // User lists
   if (cfg.user) {
     catalogs.push({
-      id: `user-${cfg.user}`,
-      type: "series",
-      name: `MDL User Lists – ${cfg.user}`
-    });
-  }
-
-  // Custom lists
-  (cfg.lists || []).forEach((list) => {
-    catalogs.push({
-      id: `custom-${list.id}`,
-      type: "series",
-      name: list.name || `MDL List ${list.id}`
-    });
-  });
-
-  // Popular / Trending
-  const inc = cfg.includePopularTrending || {};
-  const countries = ["kr", "jp", "cn", "th", "hk"];
-
-  countries.forEach((c) => {
-    if (inc[c]) {
-      catalogs.push({
-        id: `popular-${c}`,
-        type: "series",
-        name: `Popular ${c.toUpperCase()} Dramas`
-      });
-      catalogs.push({
-        id: `trending-${c}`,
-        type: "series",
-        name: `Trending ${c.toUpperCase()} Dramas`
-      });
-    }
-  });
-
-  const manifest = {
-    id: "org.drew.mdl.dynamic",
-    version: "1.0.0",
-    name: "MyDramaList Dynamic Addon",
-    description: "User-configurable MDL addon for Stremio",
-    resources: ["catalog"],
-    types: ["series"],
-    catalogs
-  };
-
-  res.json(manifest);
-});
-
-// Stremio catalog handler
-app.get("/catalog/:type/:id.json", async (req, res) => {
-  const { id } = req.params;
-  const cfg = decodeConfig(req) || {};
-
-  try {
-    // User lists
-    if (id.startsWith("user-")) {
-      const username = id.replace("user-", "");
-      const metas = await fetchUserLists(username);
-      return res.json({ metas });
-    }
-
-    // Custom lists
-    if (id.startsWith("custom-")) {
-      const listId = id.replace("custom-", "");
-      const metas = await fetchCustomList(listId);
-      return res.json({ metas });
-    }
-
-    // Popular / Trending
-    if (id.includes("-")) {
-      const [mode, country] = id.split("-");
-      const metas = await fetchCountryList(country, mode);
-      return res.json({ metas });
-    }
-
-    res.json({ metas: [] });
-  } catch (err) {
-    console.error(err);
-    res.json({ metas: [] });
-  }
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("MDL Addon running on port", PORT);
-});
+      id
