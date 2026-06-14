@@ -98,4 +98,77 @@ app.get("/manifest.json", (req, res) => {
   // User lists
   if (cfg.user) {
     catalogs.push({
-      id
+      id: `user-${cfg.user}--${configBase64}`,
+      type: "series",
+      name: `MDL User Lists – ${cfg.user}`
+    });
+  }
+
+  // Custom lists
+  (cfg.lists || []).forEach((list) => {
+    catalogs.push({
+      id: `custom-${list.id}--${configBase64}`,
+      type: "series",
+      name: list.name || `MDL List ${list.id}`
+    });
+  });
+
+  // Popular / Trending
+  const inc = cfg.includePopularTrending || {};
+  const countries = ["kr", "jp", "cn", "th", "hk"];
+
+  countries.forEach((c) => {
+    if (inc[c]) {
+      catalogs.push({
+        id: `popular-${c}--${configBase64}`,
+        type: "series",
+        name: `Popular ${c.toUpperCase()} Dramas`
+      });
+      catalogs.push({
+        id: `trending-${c}--${configBase64}`,
+        type: "series",
+        name: `Trending ${c.toUpperCase()} Dramas`
+      });
+    }
+  });
+
+  res.json({
+    id: "org.drew.mdl.dynamic",
+    version: "2.0.0",
+    name: "MyDramaList Dynamic Addon (TMDB Linked)",
+    description: "User-configurable MDL addon with TMDB metadata",
+    resources: ["catalog"],
+    types: ["series"],
+    catalogs
+  });
+});
+
+// Catalog handler
+app.get("/catalog/:type/:id.json", async (req, res) => {
+  const [rawId, configBase64] = req.params.id.split("--");
+  const cfg = decodeConfig(configBase64) || {};
+
+  try {
+    if (rawId.startsWith("user-")) {
+      const username = rawId.replace("user-", "");
+      return res.json({ metas: await fetchUserLists(username) });
+    }
+
+    if (rawId.startsWith("custom-")) {
+      const listId = rawId.replace("custom-", "");
+      return res.json({ metas: await fetchCustomList(listId) });
+    }
+
+    if (rawId.includes("-")) {
+      const [mode, country] = rawId.split("-");
+      return res.json({ metas: await fetchCountryList(country, mode) });
+    }
+
+    res.json({ metas: [] });
+  } catch (err) {
+    console.error(err);
+    res.json({ metas: [] });
+  }
+});
+
+app.listen(process.env.PORT || 3000);
