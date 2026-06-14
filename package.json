@@ -1,0 +1,15 @@
+{
+  "name": "stremio-mdl-addon",
+  "version": "1.0.0",
+  "description": "Dynamic MyDramaList addon for Stremio with user-configurable catalogs",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "stremio-addon-sdk": "^1.4.0"
+  }
+}
