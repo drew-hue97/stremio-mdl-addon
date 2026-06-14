@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MyDramaList Addon Builder</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 40px auto; }
+    input, textarea { width: 100%; margin: 8px 0; padding: 8px; }
+    button { padding: 10px 20px; margin-top: 10px; }
+    .output { margin-top: 20px; padding: 10px; background: #eee; }
+  </style>
+</head>
+<body>
+
+<h2>MyDramaList Addon Builder</h2>
+
+<label>MDL Profile URL</label>
+<input id="profile" placeholder="https://mydramalist.com/profile/USERNAME">
+
+<label>MDL List URLs (one per line)</label>
+<textarea id="lists" rows="5" placeholder="https://mydramalist.com/list/12345abcd"></textarea>
+
+<h3>Include Popular / Trending</h3>
+<label><input type="checkbox" id="kr"> Korea</label><br>
+<label><input type="checkbox" id="jp"> Japan</label><br>
+<label><input type="checkbox" id="cn"> China</label><br>
+<label><input type="checkbox" id="th"> Thailand</label><br>
+<label><input type="checkbox" id="hk"> Hong Kong</label><br>
+
+<button onclick="generate()">Generate Addon URL</button>
+
+<div class="output" id="output"></div>
+
+<script>
+function extractUsername(url) {
+  const m = url.match(/profile\/([^\/]+)/);
+  return m ? m[1] : null;
+}
+
+function extractListId(url) {
+  const m = url.match(/list\/([^\/]+)/);
+  return m ? m[1] : null;
+}
+
+function generate() {
+  const profile = document.getElementById("profile").value.trim();
+  const listsRaw = document.getElementById("lists").value.trim().split("\n");
+
+  const username = extractUsername(profile);
+
+  const lists = listsRaw
+    .map(l => extractListId(l))
+    .filter(Boolean)
+    .map(id => ({ id }));
+
+  const includePopularTrending = {
+    kr: document.getElementById("kr").checked,
+    jp: document.getElementById("jp").checked,
+    cn: document.getElementById("cn").checked,
+    th: document.getElementById("th").checked,
+    hk: document.getElementById("hk").checked
+  };
+
+  const config = {
+    user: username,
+    lists,
+    includePopularTrending
+  };
+
+  const base64 = btoa(JSON.stringify(config));
+
+  const url = `${window.location.origin}/manifest.json?config=${base64}`;
+
+  document.getElementById("output").innerText = url;
+}
+</script>
+
+</body>
+</html>
